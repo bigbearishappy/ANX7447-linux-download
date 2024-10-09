@@ -2,7 +2,7 @@ CC := gcc
 
 CFLAGS = 
 
-SRCS = AnxUpdate.c Flash.c ifu.c
+SRCS = anx7447_firmware_download.c 
 OBJS = $(SRCS:.c=.o)
 
 TARGET = anx7447_firmware_download
