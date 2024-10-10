@@ -1,4 +1,13 @@
 #include<stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <linux/i2c-dev.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+
+#define delay_ms(x) usleep(x * 1000)
+#define I2C_DEVICE "/dev/i2c-0"
+int file = 0;
 
 /*******************************************************************************************
 Copyright (c) 2017, Analogix Semiconductor, Inc.
@@ -10,8 +19,8 @@ Revision History:
 *********************************************************************************************/
 
 #define DATA_BLOCK_SIZE 32
-#define I2C_TCPC_ADDR 0x58
-#define I2C_SPI_ADDR 0x7E
+#define I2C_TCPC_ADDR 0x2C
+#define I2C_SPI_ADDR 0x3F
 #define R_RAM_LEN_H 0x03
 #define FLASH_ADDR_EXTEND 0x80
 #define R_RAM_CTRL 0x05
@@ -51,8 +60,32 @@ Revision History:
 unsigned char i2c_ReadByte(unsigned char devAddr, unsigned char regAddr)
 {
  unsigned char tmpData = 0;
- ReadRegister(devAddr, regAddr,&tmpData);
- return tmpData;
+ //ReadRegister(devAddr, regAddr,&tmpData);
+    if(!file) {
+	    perror("file not opened.open it first");
+	    return ;
+    }
+
+    if (ioctl(file, I2C_SLAVE, devAddr) < 0) {
+        perror("Failed to acquire bus access and/or talk to slave");
+        close(file);
+        return ;
+    }
+ 
+    if (write(file, &regAddr, 1) != 1) {
+        perror("Failed to write to the i2c bus");
+        close(file);
+	goto err;
+    }
+
+    if (read(file, &tmpData, 1) != 1) {
+        perror("Failed to read from the i2c bus");
+        close(file);
+	goto err;
+    }
+
+err:
+    return tmpData;
 }
 
 /*
@@ -62,7 +95,26 @@ unsigned char i2c_ReadByte(unsigned char devAddr, unsigned char regAddr)
 */
 void i2c_WriteByte(unsigned char devAddr, unsigned char regAddr, unsigned char value)
 {
- WriteRegister(devAddr, regAddr, value);
+    unsigned char tmp_buf[2];
+    if(!file) {
+	    perror("file not opened.open it first");
+	    return ;
+    }
+
+    if (ioctl(file, I2C_SLAVE, devAddr) < 0) {
+        perror("Failed to acquire bus access and/or talk to slave");
+        close(file);
+        return ;
+    }
+
+    tmp_buf[0] = regAddr;
+    tmp_buf[1] = value;
+    if (write(file, tmp_buf, 2) != 2) {
+        perror("Failed to write to the i2c bus");
+        close(file);
+        return ;
+    }
+    //WriteRegister(devAddr, regAddr, value);
 }
 #define i2c_WriteByte_or(dev, reg, value) i2c_WriteByte(dev, reg, (i2c_ReadByte(dev, reg) | value))
 #define i2c_WriteByte_and(dev, reg, value) i2c_WriteByte(dev, reg, (i2c_ReadByte(dev, reg) & value))
@@ -200,5 +252,21 @@ void flash_chip_erase(void)
 
 void main()
 {
-	printf("anx7447\n");
+    unsigned char reg_data;
+    unsigned char flash_data[32];
+    printf("anx7447 firmware down via i2c\n");
+
+    if ((file = open(I2C_DEVICE, O_RDWR)) < 0) {
+        perror("Failed to open the i2c bus");
+        return ;
+    }
+
+    reg_data = i2c_ReadByte(0x2c, 0x00);
+    printf("reg_data:0x%02x\n", reg_data);
+    //flash_chip_erase();
+    flash_read(0x1e000, flash_data);
+    for(int i = 0;i < sizeof(flash_data); i++)
+	    printf("%d:0x%02x\n", i, flash_data[i]);
+
+    close(file);
 }
