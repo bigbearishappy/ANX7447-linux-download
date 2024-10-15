@@ -338,10 +338,6 @@ unsigned char cus_img_end[] = {
 
 void main(int argc, char *argv[])
 {
-    if(argc != 2) {
-            printf("usage: %s <your.hex>\n", argv[0]);
-            return 1;
-    }
     const char *filename = argv[1];
     size_t buffer_size = 0;
     unsigned char *img_buffer = NULL;
@@ -352,44 +348,13 @@ void main(int argc, char *argv[])
     unsigned char flash_data[1024];
     printf("anx7447 firmware down via i2c\n");
 
-
-    calculate_buffer_size(filename, &buffer_size);
-    if(buffer_size % 32 != 0)//the data length must be a integer multiple of 32.
-            buffer_size = (buffer_size / 32 + 1) * 32;
-    printf("img_buffer size:%d\n", buffer_size);
-    img_buffer = (unsigned char *)malloc(buffer_size);
-    if (img_buffer == NULL) {
-        printf("malloc failed\n");
-        return 1;
-    }
-    memset(img_buffer, 0xff, buffer_size);
-
-    fill_img_buffer(filename, img_buffer);
-
     if ((file = open(I2C_DEVICE, O_RDWR)) < 0) {
         perror("Failed to open the i2c bus");
         return ;
     }
-    //erase full flash first
-    flash_chip_erase();
-    printf("erase full flash done\n");
 
-    //read flash data on 0x00000 
-    printf("read flash data on 0x00000\n");
-    for(int j = 0;j < sizeof(flash_data); j = j + 32) { 
-    	flash_read(0, 0x00000 + j, &flash_data[j]);
-    }
-    for(int i = 0;i < sizeof(flash_data); i++) {
-	if(i % 16 == 0)
-	    printf("0x%05x:", i);
-    	printf("%02X", flash_data[i]);
-	if((i + 1) % 16 == 0)
-	    printf("\n");
-    }
-    printf("\n");
-
-    //read flash data on 0x0e000
-    printf("read flash data on 0x0e000\n");
+    //read flash data on 0x1e000
+    printf("read flash data on 0x1e000\n");
     for(int j = 0;j < sizeof(flash_data); j = j + 32) { 
     	flash_read(1, 0x0e000 + j, &flash_data[j]);
     }
@@ -402,14 +367,6 @@ void main(int argc, char *argv[])
     }
     printf("\n");
 
-    //write ocm image
-    printf("start write ocm img...\n");
-    for(int j = 0;j < buffer_size; j = j + 32) {
-	    flash_write(0, 0x00000 + j, &img_buffer[j]);
-    }
-    flash_write(0, 0x0dfe0, ocm_img_end);
-    printf("write ocm img done\n");
-
     //write custome image
     printf("start write custom img...\n");
     for(int j = 0;j < sizeof(custom_img); j = j + 32) {
@@ -419,20 +376,7 @@ void main(int argc, char *argv[])
     printf("write custom img done\n");
 
     //read flash data back
-    printf("read flash data back on 0x00000\n");
-    for(int j = 0;j < sizeof(flash_data); j = j + 32) { 
-    	flash_read(0, 0x00000 + j, &flash_data[j]);
-    }
-    for(int i = 0;i < sizeof(flash_data); i++) {
-	if(i % 16 == 0)
-	    printf("0x%05x:", i);
-    	printf("%02X", flash_data[i]);
-	if((i + 1) % 16 == 0)
-	    printf("\n");
-    }
-    printf("\n");
-
-    printf("read flash data back on 0x0e000\n");
+    printf("read flash data back on 0x1e000\n");
     for(int j = 0;j < sizeof(flash_data); j = j + 32) { 
     	flash_read(1, 0x0e000 + j, &flash_data[j]);
     }
