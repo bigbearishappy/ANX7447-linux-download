@@ -4,10 +4,13 @@
 #include <linux/i2c-dev.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
+#include <string.h>
 
 #define delay_ms(x) usleep(x * 1000)
 #define I2C_DEVICE "/dev/i2c-0"
 int file = 0;
+
+#define MAX_LINE_LENGTH 512
 
 /*******************************************************************************************
 Copyright (c) 2017, Analogix Semiconductor, Inc.
@@ -170,7 +173,7 @@ void flash_unprotect(void)
  Length, the default length is 32. If data length is less than 32 bytes,
  have to fill in 0xFF.
 */
-void flash_write(unsigned int address, unsigned char *buf)
+void flash_write(unsigned int block, unsigned int address, unsigned char *buf)
 {
  unsigned char i;
  flash_operation_init();
@@ -185,7 +188,10 @@ void flash_write(unsigned int address, unsigned char *buf)
  /* wait for Write Enable (WREN) Sequence done*/
  while(!(i2c_ReadByte(I2C_SPI_ADDR, R_RAM_CTRL) & FLASH_DONE));
  /* write flash address*/
- i2c_WriteByte_and(I2C_SPI_ADDR, R_RAM_LEN_H , ~FLASH_ADDR_EXTEND);
+ if(!block)
+   i2c_WriteByte_and(I2C_SPI_ADDR, R_RAM_LEN_H , ~FLASH_ADDR_EXTEND);
+ else
+   i2c_WriteByte_or(I2C_SPI_ADDR, R_RAM_LEN_H , FLASH_ADDR_EXTEND);
  i2c_WriteByte(I2C_SPI_ADDR, R_FLASH_ADDR_H, (unsigned char)((address ) >> 8));
  i2c_WriteByte(I2C_SPI_ADDR, R_FLASH_ADDR_L, (unsigned char)((address ) & 0xff));
  /* write data length*/
@@ -208,12 +214,15 @@ void flash_write(unsigned int address, unsigned char *buf)
 * Returns : No
 * Note: The data length must be 32 bytes.
 */
-void flash_read(unsigned int address, unsigned char *buf)
+void flash_read(unsigned int block, unsigned int address, unsigned char *buf)
 {
  unsigned char i;
  flash_operation_init();
  /* write flash address*/
- i2c_WriteByte_and(I2C_SPI_ADDR, R_RAM_LEN_H , ~FLASH_ADDR_EXTEND);
+ if(!block)
+   i2c_WriteByte_and(I2C_SPI_ADDR, R_RAM_LEN_H , ~FLASH_ADDR_EXTEND);
+ else
+   i2c_WriteByte_or(I2C_SPI_ADDR, R_RAM_LEN_H , FLASH_ADDR_EXTEND);
  i2c_WriteByte(I2C_SPI_ADDR, R_FLASH_ADDR_H, (unsigned char)((address ) >> 8));
  i2c_WriteByte(I2C_SPI_ADDR, R_FLASH_ADDR_L, (unsigned char)((address ) & 0xff));
  /* write data length*/
@@ -250,6 +259,60 @@ void flash_chip_erase(void)
  while(!(i2c_ReadByte(I2C_SPI_ADDR, R_RAM_CTRL) & FLASH_DONE));
 }
 
+//file operation
+void calculate_buffer_size(const char *filename, size_t *buffer_size) {
+    FILE *hex_file;
+    char line[MAX_LINE_LENGTH];
+    int byte_count;
+
+    hex_file = fopen(filename, "r");
+    if (hex_file == NULL) {
+        printf("can't open file\n");
+        exit(1);
+    }
+
+    while (fgets(line, sizeof(line), hex_file)) {
+        if (line[0] == ':') {
+            sscanf(line + 1, "%02x", &byte_count);
+            if(byte_count == 16) {
+                *buffer_size += byte_count;  
+            }
+        }
+    }
+
+    fclose(hex_file);
+}
+
+void fill_img_buffer(const char *filename, unsigned char *buffer) {
+    FILE *hex_file;
+    char line[MAX_LINE_LENGTH];
+    int byte_count, address, record_type;
+    unsigned char data[256]; 
+    size_t buffer_offset = 0;
+
+    hex_file = fopen(filename, "r");
+    if (hex_file == NULL) {
+        printf("can't open file\n");
+        exit(1);
+    }
+
+    while (fgets(line, sizeof(line), hex_file)) {
+        if (line[0] == ':') {
+            sscanf(line + 1, "%02x%04x%02x", &byte_count, &address, &record_type);
+
+            if (record_type == 0x00) { //handle data only 
+                for (int i = 0; i < byte_count; i++) {
+                    sscanf(line + 9 + i * 2, "%02x", &data[i]);
+                }
+                memcpy(buffer + buffer_offset, data, byte_count);
+                buffer_offset += byte_count;
+            }
+        }
+    }
+
+    fclose(hex_file);
+}
+
 unsigned char custom_img[] = {
 	0x05,0x00,0x2C,0x91,0x01,0x36,0x07,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
 	0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
@@ -261,37 +324,128 @@ unsigned char custom_img[] = {
 	0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
 	0x05,0x08,0xCE,0x0C,0x00,0x00,0x19,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
 	0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
-	0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
-	0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x05,0x01,0xCD,0x3A,
 };
 
-void main()
+unsigned char ocm_img_end[] = {
+0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x9C,0x50,0xA7,0xDC,
+};
+
+unsigned char cus_img_end[] = {
+0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x05,0x01,0xCD,0x3A,
+};
+
+void main(int argc, char *argv[])
 {
+    if(argc != 2) {
+            printf("usage: %s <your.hex>\n", argv[0]);
+            return 1;
+    }
+    const char *filename = argv[1];
+    size_t buffer_size = 0;
+    unsigned char *img_buffer = NULL;
+
     unsigned char reg_data;
-    unsigned char flash_data[192];
+    //unsigned char flash_data[192];
+    //unsigned char flash_data[131072];
+    unsigned char flash_data[1024];
     printf("anx7447 firmware down via i2c\n");
+
+
+    calculate_buffer_size(filename, &buffer_size);
+    if(buffer_size % 32 != 0)//the data length must be a integer multiple of 32.
+            buffer_size = (buffer_size / 32 + 1) * 32;
+    printf("img_buffer size:%d\n", buffer_size);
+    img_buffer = (unsigned char *)malloc(buffer_size);
+    if (img_buffer == NULL) {
+        printf("malloc failed\n");
+        return 1;
+    }
+    memset(img_buffer, 0xff, buffer_size);
+
+    fill_img_buffer(filename, img_buffer);
 
     if ((file = open(I2C_DEVICE, O_RDWR)) < 0) {
         perror("Failed to open the i2c bus");
         return ;
     }
+    //erase full flash first
+    flash_chip_erase();
+    printf("erase full flash done\n");
 
-    reg_data = i2c_ReadByte(0x2c, 0x00);
-    printf("reg_data:0x%02x\n", reg_data);
-    //flash_chip_erase();
-    for(int j = 0;j < sizeof(custom_img); j = j + 32) 
-    flash_read(0x1e000 + j, &flash_data[j]);
-    for(int i = 0;i < sizeof(flash_data); i++)
-	    printf("%d:0x%02x\n", i, flash_data[i]);
+    //read flash data on 0x00000 
+    printf("read flash data on 0x00000\n");
+    for(int j = 0;j < sizeof(flash_data); j = j + 32) { 
+    	flash_read(0, 0x00000 + j, &flash_data[j]);
+    }
+    for(int i = 0;i < sizeof(flash_data); i++) {
+	if(i % 16 == 0)
+	    printf("0x%05x:", i);
+    	printf("%02X", flash_data[i]);
+	if((i + 1) % 16 == 0)
+	    printf("\n");
+    }
+    printf("\n");
 
-//    for(int j = 0;j < sizeof(custom_img); j = j + 32) {
-//	    flash_write(0x1e000 + j, &custom_img[j]);
-//    }
-//    printf("write custom img done\n");
-//
-//    flash_read(0x1e000, flash_data);
-//    for(int i = 0;i < sizeof(flash_data); i++)
-//	    printf("%d:0x%02x\n", i, flash_data[i]);
+    //read flash data on 0x0e000
+    printf("read flash data on 0x0e000\n");
+    for(int j = 0;j < sizeof(flash_data); j = j + 32) { 
+    	flash_read(1, 0x0e000 + j, &flash_data[j]);
+    }
+    for(int i = 0;i < sizeof(flash_data); i++) {
+	if(i % 16 == 0)
+	    printf("0x%05x:", i + 0x0e000);
+    	printf("%02X", flash_data[i]);
+	if((i + 1) % 16 == 0)
+	    printf("\n");
+    }
+    printf("\n");
+
+    //write ocm image
+    printf("start write ocm img...\n");
+    for(int j = 0;j < buffer_size; j = j + 32) {
+	    flash_write(0, 0x00000 + j, &img_buffer[j]);
+    }
+    flash_write(0, 0x0dfe0, ocm_img_end);
+    printf("write ocm img done\n");
+
+    //write custome image
+    printf("start write custom img...\n");
+    for(int j = 0;j < sizeof(custom_img); j = j + 32) {
+	    flash_write(1, 0x0e000 + j, &custom_img[j]);
+    }
+    flash_write(1, 0x1e3c0, cus_img_end);
+    printf("write custom img done\n");
+
+    //read flash data back
+    printf("read flash data back on 0x00000\n");
+    for(int j = 0;j < sizeof(flash_data); j = j + 32) { 
+    	flash_read(0, 0x00000 + j, &flash_data[j]);
+    }
+    for(int i = 0;i < sizeof(flash_data); i++) {
+	if(i % 16 == 0)
+	    printf("0x%05x:", i);
+    	printf("%02X", flash_data[i]);
+	if((i + 1) % 16 == 0)
+	    printf("\n");
+    }
+    printf("\n");
+
+    printf("read flash data back on 0x0e000\n");
+    for(int j = 0;j < sizeof(flash_data); j = j + 32) { 
+    	flash_read(1, 0x0e000 + j, &flash_data[j]);
+    }
+    for(int i = 0;i < sizeof(flash_data); i++) {
+	if(i % 16 == 0)
+	    printf("0x%05x:", i + 0x0e000);
+    	printf("%02X", flash_data[i]);
+	if((i + 1) % 16 == 0)
+	    printf("\n");
+    }
+    printf("\n");
+
+    free(img_buffer);
 
     close(file);
 }
