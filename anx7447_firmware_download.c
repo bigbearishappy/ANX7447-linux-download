@@ -343,29 +343,38 @@ void main(int argc, char *argv[])
     unsigned char *img_buffer = NULL;
 
     unsigned char reg_data;
-    //unsigned char flash_data[192];
-    //unsigned char flash_data[131072];
     unsigned char flash_data[1024];
-    printf("anx7447 firmware down via i2c\n");
+    unsigned char target_flash_data[1024];
+    //printf("anx7447 firmware down via i2c\n");
 
     if ((file = open(I2C_DEVICE, O_RDWR)) < 0) {
         perror("Failed to open the i2c bus");
         return ;
     }
 
+    //init the target flash data
+    memset(target_flash_data, 0xff, sizeof(target_flash_data));
+    memcpy(target_flash_data + 0, custom_img, sizeof(custom_img));
+    memcpy(target_flash_data + 0x3c0, cus_img_end, sizeof(cus_img_end));
+
     //read flash data on 0x1e000
     printf("read flash data on 0x1e000\n");
     for(int j = 0;j < sizeof(flash_data); j = j + 32) { 
     	flash_read(1, 0x0e000 + j, &flash_data[j]);
     }
-    for(int i = 0;i < sizeof(flash_data); i++) {
-	if(i % 16 == 0)
-	    printf("0x%05x:", i + 0x0e000);
-    	printf("%02X", flash_data[i]);
-	if((i + 1) % 16 == 0)
-	    printf("\n");
+    //for(int i = 0;i < sizeof(flash_data); i++) {
+    //    if(i % 16 == 0)
+    //        printf("0x%05x:", i + 0x0e000);
+    //	printf("%02X", flash_data[i]);
+    //    if((i + 1) % 16 == 0)
+    //        printf("\n");
+    //}
+    //printf("\n");
+
+    if(memcmp(flash_data, target_flash_data, sizeof(flash_data)) == 0) {
+	    printf("ANX7447 is already flashed.\n");
+	    goto flash_end;
     }
-    printf("\n");
 
     //write custome image
     printf("start write custom img...\n");
@@ -380,16 +389,18 @@ void main(int argc, char *argv[])
     for(int j = 0;j < sizeof(flash_data); j = j + 32) { 
     	flash_read(1, 0x0e000 + j, &flash_data[j]);
     }
-    for(int i = 0;i < sizeof(flash_data); i++) {
-	if(i % 16 == 0)
-	    printf("0x%05x:", i + 0x0e000);
-    	printf("%02X", flash_data[i]);
-	if((i + 1) % 16 == 0)
-	    printf("\n");
-    }
-    printf("\n");
+    //for(int i = 0;i < sizeof(flash_data); i++) {
+    //    if(i % 16 == 0)
+    //        printf("0x%05x:", i + 0x0e000);
+    //	printf("%02X", flash_data[i]);
+    //    if((i + 1) % 16 == 0)
+    //        printf("\n");
+    //}
+    //printf("\n");
 
+flash_end:
     free(img_buffer);
 
     close(file);
+    printf("Flash done.\n");
 }
